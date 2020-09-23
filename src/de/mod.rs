@@ -1,4 +1,4 @@
-use std::io::Read;
+use std::{collections::VecDeque, collections::vec_deque, io::Read};
 
 use serde::de::{self, Unexpected};
 use xml::name::OwnedName;
@@ -62,7 +62,7 @@ pub fn from_reader<'de, R: Read, T: de::Deserialize<'de>>(reader: R) -> Result<T
 pub struct Deserializer<R: Read> {
     depth: usize,
     reader: EventReader<R>,
-    peeked: Option<XmlEvent>,
+    peeked_buffer: VecDeque<XmlEvent>,
     is_map_value: bool,
 }
 
@@ -71,7 +71,7 @@ impl<'de, R: Read> Deserializer<R> {
         Deserializer {
             depth: 0,
             reader: reader,
-            peeked: None,
+            peeked_buffer: VecDeque::new(),
             is_map_value: false,
         }
     }
@@ -88,18 +88,29 @@ impl<'de, R: Read> Deserializer<R> {
     }
 
     fn peek(&mut self) -> Result<&XmlEvent> {
-        if self.peeked.is_none() {
-            self.peeked = Some(self.inner_next()?);
-        }
-        debug_expect!(self.peeked.as_ref(), Some(peeked) => {
-            debug!("Peeked {:?}", peeked);
-            Ok(peeked)
-        })
+        panic!()
+        // if self.peeked_buffer.is_none() {
+        //     self.peeked_buffer = Some(self.next_significant()?);
+        // }
+        // debug_expect!(self.peeked_buffer.as_ref(), Some(peeked) => {
+        //     debug!("Peeked {:?}", peeked);
+        //     Ok(peeked)
+        // })
     }
 
-    fn inner_next(&mut self) -> Result<XmlEvent> {
+    fn peek_many<'pe>(&'pe mut self) -> PeekMany<'pe, R> {
+        let Deserializer { reader, peeked_buffer, .. } = self;
+        let iter = peeked_buffer.iter();
+        PeekMany {
+            reader,
+            peeked_buffer,
+            state: PeekManyState::FromBuffer { iter }
+        }
+    }
+
+    fn next_significant(reader: &mut EventReader<R>) -> Result<XmlEvent> {
         loop {
-            match self.reader.next()? {
+            match reader.next()? {
                 XmlEvent::StartDocument { .. }
                 | XmlEvent::ProcessingInstruction { .. }
                 | XmlEvent::Whitespace { .. }
@@ -110,10 +121,10 @@ impl<'de, R: Read> Deserializer<R> {
     }
 
     fn next(&mut self) -> Result<XmlEvent> {
-        let next = if let Some(peeked) = self.peeked.take() {
+        let next = if let Some(peeked) = self.peeked_buffer.pop_front() {
             peeked
         } else {
-            self.inner_next()?
+            Self::next_significant(&mut self.reader)?
         };
         match next {
             XmlEvent::StartElement { .. } => {
@@ -181,6 +192,43 @@ impl<'de, R: Read> Deserializer<R> {
                 return Ok(s)
             })
         })
+    }
+}
+
+struct PeekMany<'pe, R: Read> {
+    reader: &'pe mut EventReader<R>,
+    peeked_buffer: &'pe mut VecDeque<XmlEvent>,
+    state: PeekManyState<'pe>
+}
+
+enum PeekManyState<'pe> {
+    FromBuffer { iter: vec_deque::Iter<'pe, XmlEvent> },
+    FromReader
+}
+
+impl<'pe, R: Read> PeekMany<'pe, R> {
+    fn next<'ne>(&'ne mut self) -> Result<&'pe XmlEvent> {
+        let PeekMany { reader, peeked_buffer, state } = self;
+
+        match state {
+            PeekManyState::FromBuffer { iter } => {
+                match iter.next() {
+                    Some(ev) => Ok(ev),
+                    None => {
+                        drop(iter);
+                        *state = PeekManyState::FromReader;
+                        let next = Deserializer::next_significant(reader)?;
+                        peeked_buffer.push_back(next);
+                        Ok(peeked_buffer.back().unwrap())
+                    }
+                }
+            }
+            PeekManyState::FromReader => {
+                let next = Deserializer::next_significant(reader)?;
+                peeked_buffer.push_back(next);
+                Ok(peeked_buffer.back().unwrap())
+            }
+        }
     }
 }
 
