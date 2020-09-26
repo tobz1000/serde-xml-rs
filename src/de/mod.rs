@@ -210,25 +210,20 @@ impl<'pe, R: Read> PeekMany<'pe, R> {
     fn next<'ne>(&'ne mut self) -> Result<&'pe XmlEvent> {
         let PeekMany { reader, peeked_buffer, state } = self;
 
-        match state {
-            PeekManyState::FromBuffer { iter } => {
-                match iter.next() {
-                    Some(ev) => Ok(ev),
-                    None => {
-                        drop(iter);
-                        *state = PeekManyState::FromReader;
-                        let next = Deserializer::next_significant(reader)?;
-                        peeked_buffer.push_back(next);
-                        Ok(peeked_buffer.back().unwrap())
-                    }
+        if let PeekManyState::FromBuffer { iter } = state {
+            match iter.next() {
+                Some(ev) => {
+                    return Ok(ev);
+                }
+                None => {
+                    *state = PeekManyState::FromReader;
                 }
             }
-            PeekManyState::FromReader => {
-                let next = Deserializer::next_significant(reader)?;
-                peeked_buffer.push_back(next);
-                Ok(peeked_buffer.back().unwrap())
-            }
         }
+
+        let next = Deserializer::next_significant(reader)?;
+        peeked_buffer.push_back(next);
+        Ok(peeked_buffer.back().unwrap())
     }
 }
 
