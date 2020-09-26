@@ -103,7 +103,7 @@ impl<'de, R: Read> Deserializer<R> {
         PeekMany {
             reader,
             peeked_buffer,
-            state: PeekManyState::FromBuffer { index: 0 }
+            index: 0
         }
     }
 
@@ -197,41 +197,19 @@ impl<'de, R: Read> Deserializer<R> {
 struct PeekMany<'pe, R: Read> {
     reader: &'pe mut EventReader<R>,
     peeked_buffer: &'pe mut VecDeque<XmlEvent>,
-    state: PeekManyState
-}
-
-enum PeekManyState {
-    FromBuffer { index: usize },
-    FromReader
+    index: usize
 }
 
 impl<'pe, R: Read> PeekMany<'pe, R> {
     fn next(&mut self) -> Result<&XmlEvent> {
-        let PeekMany { reader, peeked_buffer, state } = self;
-
-        if let PeekManyState::FromBuffer { index } = state {
-            // `unsafe` justification: borrow checker otherwise does not allow the `push_back` call later on, despite
-            // the borrow here (from peeked_buffer.get) being out of scope. This is a known limitation whose fix is
-            // not stable.
-            let peeked_buffer: &'pe mut VecDeque<XmlEvent> = {
-                let peeked_buffer_ptr = *peeked_buffer as *mut VecDeque<XmlEvent>;
-                unsafe { &mut *peeked_buffer_ptr }
-            };
-
-            match peeked_buffer.get(*index) {
-                Some(ev) => {
-                    *index += 1;
-                    return Ok(ev);
-                }
-                None => {
-                    *state = PeekManyState::FromReader;
-                }
-            }
+        while self.peeked_buffer.len() <= self.index {
+            let next = Deserializer::next_significant(self.reader)?;
+            self.peeked_buffer.push_back(next);
         }
 
-        let next = Deserializer::next_significant(reader)?;
-        peeked_buffer.push_back(next);
-        Ok(peeked_buffer.back().unwrap())
+        self.index += 1;
+
+        debug_expect!(self.peeked_buffer.get(self.index), Some(ev) => Ok(ev))
     }
 }
 
