@@ -88,14 +88,15 @@ impl<'de, R: Read> Deserializer<R> {
     }
 
     fn peek(&mut self) -> Result<&XmlEvent> {
-        panic!()
-        // if self.peeked_buffer.is_none() {
-        //     self.peeked_buffer = Some(self.next_significant()?);
-        // }
-        // debug_expect!(self.peeked_buffer.as_ref(), Some(peeked) => {
-        //     debug!("Peeked {:?}", peeked);
-        //     Ok(peeked)
-        // })
+        if self.peeked_buffer.len() == 0 {
+            let next = Self::next_significant(&mut self.reader)?;
+            self.peeked_buffer.push_back(next);
+        }
+
+        debug_expect!(self.peeked_buffer.front(), Some(peeked) => {
+            debug!("Peeked {:?}", peeked);
+            Ok(peeked)
+        })
     }
 
     fn peek_many<'pe>(&'pe mut self) -> PeekMany<'pe, R> {
