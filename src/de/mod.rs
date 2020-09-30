@@ -63,6 +63,7 @@ pub struct Deserializer<R: Read> {
     depth: usize,
     reader: EventReader<R>,
     peeked_buffer: VecDeque<XmlEvent>,
+    /// Transient flag indicating that the cursor is currently at the start of an XML element.
     is_map_value: bool,
 }
 
@@ -87,6 +88,7 @@ impl<'de, R: Read> Deserializer<R> {
         Self::new(EventReader::new_with_config(reader, config))
     }
 
+    /// Gets the next XML event without advancing the cursor.
     fn peek(&mut self) -> Result<&XmlEvent> {
         if self.peeked_buffer.len() == 0 {
             let next = Self::next_significant(&mut self.reader)?;
@@ -99,6 +101,7 @@ impl<'de, R: Read> Deserializer<R> {
         })
     }
 
+    /// Creates a pseudo-iterator which can peek indefinitely without advancing the cursor of this Deserializer.
     fn peek_many<'pe>(&'pe mut self) -> PeekMany<'pe, R> {
         let Deserializer { reader, peeked_buffer, .. } = self;
         PeekMany {
@@ -108,6 +111,7 @@ impl<'de, R: Read> Deserializer<R> {
         }
     }
 
+    /// Reads the next XML event from the underlying reader, skipping events we're not interested in.
     fn next_significant(reader: &mut EventReader<R>) -> Result<XmlEvent> {
         loop {
             match reader.next()? {
@@ -120,6 +124,7 @@ impl<'de, R: Read> Deserializer<R> {
         }
     }
 
+    /// Gets the XML event at the cursor and advances the cursor.
     fn next(&mut self) -> Result<XmlEvent> {
         let next = if let Some(peeked) = self.peeked_buffer.pop_front() {
             peeked
@@ -147,6 +152,10 @@ impl<'de, R: Read> Deserializer<R> {
         ::std::mem::replace(&mut self.is_map_value, false)
     }
 
+    /// If `self.is_map_value`: Performs the read operations specified by `f` on the inner content of an XML element.
+    /// `f` is expected to consume the entire inner contents of the element. The cursor will be moved to the end of the
+    /// element.
+    /// If `!self.is_map_value`: `f` will be performed without additional checks/advances for an outer XML element.
     fn read_inner_value<V: de::Visitor<'de>, T, F: FnOnce(&mut Self) -> Result<T>>(
         &mut self,
         f: F,
