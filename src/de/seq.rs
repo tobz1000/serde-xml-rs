@@ -8,23 +8,30 @@ use error::{Error, Result};
 
 pub struct SeqAccess<'a, R: 'a + Read> {
     de: &'a mut Deserializer<R>,
+    starting_depth: usize,
     max_size: Option<usize>,
-    expected_name: Option<String>,
+    seq_type: SeqType,
+}
+
+pub enum SeqType {
+    Elements { expected_name: String },
+    Text
 }
 
 impl<'a, R: 'a + Read> SeqAccess<'a, R> {
-    pub fn new(de: &'a mut Deserializer<R>, max_size: Option<usize>) -> Self {
-        let expected_name = if de.unset_map_value() {
+    pub fn new(de: &'a mut Deserializer<R>, starting_depth: usize, max_size: Option<usize>) -> Self {
+        let seq_type = if de.unset_map_value() {
             debug_expect!(de.peek(), Ok(&XmlEvent::StartElement { ref name, .. }) => {
-                Some(name.local_name.clone())
+                SeqType::Elements { expected_name: name.local_name.clone() }
             })
         } else {
-            None
+            SeqType::Text
         };
         SeqAccess {
-            de: de,
-            max_size: max_size,
-            expected_name: expected_name,
+            de,
+            starting_depth,
+            max_size,
+            seq_type,
         }
     }
 }
@@ -45,17 +52,19 @@ impl<'de, 'a, R: 'a + Read> de::SeqAccess<'de> for SeqAccess<'a, R> {
             },
             None => {},
         }
-        let more = match (self.de.peek()?, self.expected_name.as_ref()) {
-            (&XmlEvent::StartElement { ref name, .. }, Some(expected_name)) => {
+
+        let more = match (self.de.peek()?, &self.seq_type) {
+            (&XmlEvent::StartElement { ref name, .. }, SeqType::Elements { expected_name }) => {
                 &name.local_name == expected_name
-            },
-            (&XmlEvent::EndElement { .. }, None) |
-            (_, Some(_)) |
+            }
+            (&XmlEvent::EndElement { .. }, SeqType::Text) |
+            (_, SeqType::Elements { .. }) |
             (&XmlEvent::EndDocument { .. }, _) => false,
-            (_, None) => true,
+            (_, SeqType::Text) => true,
         };
+
         if more {
-            if self.expected_name.is_some() {
+            if let SeqType::Elements { .. } = self.seq_type {
                 self.de.set_map_value();
             }
             seed.deserialize(&mut *self.de).map(Some)
