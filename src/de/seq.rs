@@ -50,21 +50,21 @@ impl<'de, 'a, R: 'a + Read> de::SeqAccess<'de> for SeqAccess<'a, R> {
         match self.max_size.as_mut() {
             Some(&mut 0) => {
                 return Ok(None);
-            },
+            }
             Some(max_size) => {
                 *max_size -= 1;
-            },
-            None => {},
+            }
+            None => {}
         }
 
-        let more = match (self.de.peek()?, &self.seq_type) {
-            (&XmlEvent::StartElement { ref name, .. }, SeqType::Elements { expected_name }) => {
+        let more = match (&self.seq_type, self.de.peek()?) {
+            (SeqType::Elements { expected_name }, XmlEvent::StartElement { name, .. }) => {
                 &name.local_name == expected_name
-            },
-            (&XmlEvent::EndElement { .. }, SeqType::Text)
-            | (_, SeqType::Elements { .. })
-            | (&XmlEvent::EndDocument { .. }, _) => false,
-            (_, SeqType::Text) => true,
+            }
+            (SeqType::Elements { .. }, _) => false,
+            (SeqType::Text, XmlEvent::EndElement { .. }) => false,
+            (SeqType::Text, XmlEvent::EndDocument) => false,
+            (SeqType::Text, _) => true,
         };
 
         if more {
