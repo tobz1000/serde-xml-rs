@@ -65,10 +65,17 @@ pub fn from_reader<'de, R: Read, T: de::Deserialize<'de>>(reader: R) -> Result<T
     T::deserialize(&mut Deserializer::new_from_reader(reader))
 }
 
+// TODO: Rework as distinct types implementing an `XmlDeserializer` trait?
+// This would reduce the verbosity of types & constraints which need to be specified for a generic
+// deserializer
+type RootDeserializer<R> = Deserializer<R, RootXmlBuffer<R>, DeserializerState>;
+type ChildDeserializer<'parent, R> =
+    Deserializer<R, ChildXmlBuffer<'parent, R>, &'parent mut DeserializerState>;
+
 pub struct Deserializer<
     R: Read, // Kept as type param to avoid breaking type signature change
-    B: BufferedXmlReader<R> = RootXmlBuffer<R>,
-    S: BorrowMut<DeserializerState> = DeserializerState,
+    B: BufferedXmlReader<R>,
+    S: BorrowMut<DeserializerState>,
 > {
     buffered_reader: B,
     state: S,
@@ -82,7 +89,7 @@ pub struct DeserializerState {
     is_map_value: bool,
 }
 
-impl<'de, R: Read> Deserializer<R> {
+impl<'de, R: Read> RootDeserializer<R> {
     pub fn new(reader: EventReader<R>) -> Self {
         let buffered_reader = RootXmlBuffer::new(reader);
 
@@ -220,7 +227,9 @@ macro_rules! deserialize_type {
     };
 }
 
-impl<'de, 'a, R: Read> de::Deserializer<'de> for &'a mut Deserializer<R> {
+impl<'de, 'a, R: Read, B: BufferedXmlReader<R>, S: BorrowMut<DeserializerState>>
+    de::Deserializer<'de> for &'a mut Deserializer<R, B, S>
+{
     type Error = Error;
 
     forward_to_deserialize_any! {
@@ -326,7 +335,10 @@ impl<'de, 'a, R: Read> de::Deserializer<'de> for &'a mut Deserializer<R> {
     }
 
     fn deserialize_tuple<V: de::Visitor<'de>>(self, len: usize, visitor: V) -> Result<V::Value> {
-        visitor.visit_seq(SeqAccess::new(self, self.state.borrow().depth, Some(len)))
+        let current_depth = self.state.borrow().depth;
+        let child_deserializer = self.child();
+
+        visitor.visit_seq(SeqAccess::new(child_deserializer, current_depth, Some(len)))
     }
 
     fn deserialize_enum<V: de::Visitor<'de>>(
@@ -353,7 +365,10 @@ impl<'de, 'a, R: Read> de::Deserializer<'de> for &'a mut Deserializer<R> {
     }
 
     fn deserialize_seq<V: de::Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
-        visitor.visit_seq(SeqAccess::new(self, self.state.borrow().depth, None))
+        let current_depth = self.state.borrow().depth;
+        let child_deserializer = self.child();
+
+        visitor.visit_seq(SeqAccess::new(child_deserializer, current_depth, None))
     }
 
     fn deserialize_map<V: de::Visitor<'de>>(self, visitor: V) -> Result<V::Value> {

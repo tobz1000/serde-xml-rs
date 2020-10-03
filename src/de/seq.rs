@@ -3,13 +3,11 @@ use std::io::Read;
 use serde::de;
 use xml::reader::XmlEvent;
 
-use de::Deserializer;
+use de::ChildDeserializer;
 use error::{Error, Result};
 
-use super::buffer::ChildXmlBuffer;
-
 pub struct SeqAccess<'a, R: 'a + Read> {
-    de: &'a mut Deserializer<R, ChildXmlBuffer<'a, R>>,
+    de: ChildDeserializer<'a, R>,
     starting_depth: usize,
     max_size: Option<usize>,
     seq_type: SeqType,
@@ -22,7 +20,7 @@ pub enum SeqType {
 
 impl<'a, R: 'a + Read> SeqAccess<'a, R> {
     pub fn new(
-        de: &'a mut Deserializer<R, ChildXmlBuffer<'a, R>>,
+        mut de: ChildDeserializer<'a, R>,
         starting_depth: usize,
         max_size: Option<usize>,
     ) -> Self {
@@ -73,7 +71,7 @@ impl<'de, 'a, R: 'a + Read> de::SeqAccess<'de> for SeqAccess<'a, R> {
             if let SeqType::Elements { .. } = self.seq_type {
                 self.de.set_map_value();
             }
-            seed.deserialize(&mut *self.de).map(Some)
+            seed.deserialize(&mut self.de).map(Some)
         } else {
             Ok(None)
         }
