@@ -61,9 +61,12 @@ pub struct ChildXmlBuffer<'parent, R: Read> {
 }
 
 impl<'parent, R: Read> ChildXmlBuffer<'parent, R> {
-    /// Advance the child buffer without marking an event as "used". Should only be called after `.peek()`.
-    fn skip(&mut self) {
-        debug_assert!(self.cursor < self.buffer.len());
+    /// Advance the child buffer without marking an event as "used"
+    pub fn skip(&mut self) {
+        debug_assert!(
+            self.cursor < self.buffer.len(),
+            ".skip() only should be called after .peek()"
+        );
 
         self.cursor += 1;
     }

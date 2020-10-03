@@ -144,14 +144,16 @@ impl<'de, R: Read, B: BufferedXmlReader<R>, S: BorrowMut<DeserializerState>> Des
     fn next(&mut self) -> Result<XmlEvent> {
         let next = self.buffered_reader.next()?;
 
+        // TODO: depth incrementing/decrementing doesn't occur when child serializers "skip".
+        // I think child serializers need to use cloned state rather than shared.
         match next {
             XmlEvent::StartElement { .. } => {
                 self.state.borrow_mut().depth += 1;
-            },
+            }
             XmlEvent::EndElement { .. } => {
                 self.state.borrow_mut().depth -= 1;
-            },
-            _ => {},
+            }
+            _ => {}
         }
 
         debug!("Fetched {:?}", next);
