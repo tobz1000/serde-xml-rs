@@ -1,14 +1,16 @@
-use std::{collections::VecDeque, collections::vec_deque, io::Read};
+use std::{io::Read, marker::PhantomData};
 
 use serde::de::{self, Unexpected};
 use xml::name::OwnedName;
 use xml::reader::{EventReader, ParserConfig, XmlEvent};
 
+use self::buffer::{BufferedXmlReader, RootXmlBuffer};
 use self::map::MapAccess;
 use self::seq::SeqAccess;
 use self::var::EnumAccess;
 use error::{Error, Result};
 
+mod buffer;
 mod map;
 mod seq;
 mod var;
@@ -59,21 +61,23 @@ pub fn from_reader<'de, R: Read, T: de::Deserialize<'de>>(reader: R) -> Result<T
     T::deserialize(&mut Deserializer::new_from_reader(reader))
 }
 
-pub struct Deserializer<R: Read> {
+pub struct Deserializer<R: Read, B: BufferedXmlReader = RootXmlBuffer<R>> {
     depth: usize,
-    reader: EventReader<R>,
-    peeked_buffer: VecDeque<XmlEvent>,
+    buffered_reader: B,
     /// Transient flag indicating that the cursor is currently at the start of an XML element.
     is_map_value: bool,
+    marker: PhantomData<R>,
 }
 
 impl<'de, R: Read> Deserializer<R> {
     pub fn new(reader: EventReader<R>) -> Self {
+        let buffered_reader = RootXmlBuffer::new(reader);
+
         Deserializer {
             depth: 0,
-            reader: reader,
-            peeked_buffer: VecDeque::new(),
+            buffered_reader,
             is_map_value: false,
+            marker: PhantomData,
         }
     }
 
@@ -90,47 +94,16 @@ impl<'de, R: Read> Deserializer<R> {
 
     /// Gets the next XML event without advancing the cursor.
     fn peek(&mut self) -> Result<&XmlEvent> {
-        if self.peeked_buffer.len() == 0 {
-            let next = Self::next_significant(&mut self.reader)?;
-            self.peeked_buffer.push_back(next);
-        }
+        let peeked = self.buffered_reader.peek()?;
 
-        debug_expect!(self.peeked_buffer.front(), Some(peeked) => {
-            debug!("Peeked {:?}", peeked);
-            Ok(peeked)
-        })
-    }
-
-    /// Creates a pseudo-iterator which can peek indefinitely without advancing the cursor of this Deserializer.
-    fn peek_many<'pe>(&'pe mut self) -> PeekMany<'pe, R> {
-        let Deserializer { reader, peeked_buffer, .. } = self;
-        PeekMany {
-            reader,
-            peeked_buffer,
-            index: 0
-        }
-    }
-
-    /// Reads the next XML event from the underlying reader, skipping events we're not interested in.
-    fn next_significant(reader: &mut EventReader<R>) -> Result<XmlEvent> {
-        loop {
-            match reader.next()? {
-                XmlEvent::StartDocument { .. }
-                | XmlEvent::ProcessingInstruction { .. }
-                | XmlEvent::Whitespace { .. }
-                | XmlEvent::Comment(_) => { /* skip */ }
-                other => return Ok(other),
-            }
-        }
+        debug!("Peeked {:?}", peeked);
+        Ok(peeked)
     }
 
     /// Gets the XML event at the cursor and advances the cursor.
     fn next(&mut self) -> Result<XmlEvent> {
-        let next = if let Some(peeked) = self.peeked_buffer.pop_front() {
-            peeked
-        } else {
-            Self::next_significant(&mut self.reader)?
-        };
+        let next = self.buffered_reader.next()?;
+
         match next {
             XmlEvent::StartElement { .. } => {
                 self.depth += 1;
@@ -140,6 +113,7 @@ impl<'de, R: Read> Deserializer<R> {
             }
             _ => {}
         }
+
         debug!("Fetched {:?}", next);
         Ok(next)
     }
@@ -204,32 +178,13 @@ impl<'de, R: Read> Deserializer<R> {
     }
 }
 
-struct PeekMany<'pe, R: Read> {
-    reader: &'pe mut EventReader<R>,
-    peeked_buffer: &'pe mut VecDeque<XmlEvent>,
-    index: usize
-}
-
-impl<'pe, R: Read> PeekMany<'pe, R> {
-    fn next(&mut self) -> Result<&XmlEvent> {
-        while self.peeked_buffer.len() <= self.index {
-            let next = Deserializer::next_significant(self.reader)?;
-            self.peeked_buffer.push_back(next);
-        }
-
-        self.index += 1;
-
-        debug_expect!(self.peeked_buffer.get(self.index), Some(ev) => Ok(ev))
-    }
-}
-
 macro_rules! deserialize_type {
     ($deserialize:ident => $visit:ident) => {
         fn $deserialize<V: de::Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
             let value = self.prepare_parse_type::<V>()?.parse()?;
             visitor.$visit(value)
         }
-    }
+    };
 }
 
 impl<'de, 'a, R: Read> de::Deserializer<'de> for &'a mut Deserializer<R> {
