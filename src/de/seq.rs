@@ -6,8 +6,10 @@ use xml::reader::XmlEvent;
 use de::Deserializer;
 use error::{Error, Result};
 
+use super::buffer::ChildXmlBuffer;
+
 pub struct SeqAccess<'a, R: 'a + Read> {
-    de: &'a mut Deserializer<R>,
+    de: &'a mut Deserializer<R, ChildXmlBuffer<'a, R>>,
     starting_depth: usize,
     max_size: Option<usize>,
     seq_type: SeqType,
@@ -15,11 +17,15 @@ pub struct SeqAccess<'a, R: 'a + Read> {
 
 pub enum SeqType {
     Elements { expected_name: String },
-    Text
+    Text,
 }
 
 impl<'a, R: 'a + Read> SeqAccess<'a, R> {
-    pub fn new(de: &'a mut Deserializer<R>, starting_depth: usize, max_size: Option<usize>) -> Self {
+    pub fn new(
+        de: &'a mut Deserializer<R, ChildXmlBuffer<'a, R>>,
+        starting_depth: usize,
+        max_size: Option<usize>,
+    ) -> Self {
         let seq_type = if de.unset_map_value() {
             debug_expect!(de.peek(), Ok(&XmlEvent::StartElement { ref name, .. }) => {
                 SeqType::Elements { expected_name: name.local_name.clone() }
@@ -56,10 +62,10 @@ impl<'de, 'a, R: 'a + Read> de::SeqAccess<'de> for SeqAccess<'a, R> {
         let more = match (self.de.peek()?, &self.seq_type) {
             (&XmlEvent::StartElement { ref name, .. }, SeqType::Elements { expected_name }) => {
                 &name.local_name == expected_name
-            }
-            (&XmlEvent::EndElement { .. }, SeqType::Text) |
-            (_, SeqType::Elements { .. }) |
-            (&XmlEvent::EndDocument { .. }, _) => false,
+            },
+            (&XmlEvent::EndElement { .. }, SeqType::Text)
+            | (_, SeqType::Elements { .. })
+            | (&XmlEvent::EndDocument { .. }, _) => false,
             (_, SeqType::Text) => true,
         };
 

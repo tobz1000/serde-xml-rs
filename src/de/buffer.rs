@@ -3,12 +3,15 @@ use std::{collections::VecDeque, io::Read};
 use xml::reader::{EventReader, XmlEvent};
 
 /// Retrieve XML events from an underlying reader.
-pub trait BufferedXmlReader {
+pub trait BufferedXmlReader<R: Read> {
     /// Get and "consume" the next event.
     fn next(&mut self) -> Result<XmlEvent>;
 
     /// Get the next event without consuming.
     fn peek(&mut self) -> Result<&XmlEvent>;
+
+    /// Spawn a child buffer whose cursor starts at the same position as this buffer.
+    fn child_buffer<'a>(&'a mut self) -> ChildXmlBuffer<'a, R>;
 }
 
 pub struct RootXmlBuffer<R: Read> {
@@ -23,18 +26,9 @@ impl<R: Read> RootXmlBuffer<R> {
             buffer: VecDeque::new(),
         }
     }
-
-    pub fn child_buffer<'root>(&'root mut self) -> ChildXmlBuffer<'root, R> {
-        let RootXmlBuffer { reader, buffer } = self;
-        ChildXmlBuffer {
-            reader,
-            buffer,
-            cursor: 0,
-        }
-    }
 }
 
-impl<R: Read> BufferedXmlReader for RootXmlBuffer<R> {
+impl<R: Read> BufferedXmlReader<R> for RootXmlBuffer<R> {
     /// Used XML events in the root buffer are moved to the caller
     fn next(&mut self) -> Result<XmlEvent> {
         loop {
@@ -49,15 +43,24 @@ impl<R: Read> BufferedXmlReader for RootXmlBuffer<R> {
     fn peek(&mut self) -> Result<&XmlEvent> {
         get_from_buffer_or_reader(&mut self.buffer, &mut self.reader, 0)
     }
+
+    fn child_buffer<'root>(&'root mut self) -> ChildXmlBuffer<'root, R> {
+        let RootXmlBuffer { reader, buffer } = self;
+        ChildXmlBuffer {
+            reader,
+            buffer,
+            cursor: 0,
+        }
+    }
 }
 
-pub struct ChildXmlBuffer<'root, R: Read> {
-    reader: &'root mut EventReader<R>,
-    buffer: &'root mut VecDeque<CachedXmlEvent>,
+pub struct ChildXmlBuffer<'parent, R: Read> {
+    reader: &'parent mut EventReader<R>,
+    buffer: &'parent mut VecDeque<CachedXmlEvent>,
     cursor: usize,
 }
 
-impl<'root, R: Read> ChildXmlBuffer<'root, R> {
+impl<'parent, R: Read> ChildXmlBuffer<'parent, R> {
     /// Advance the child buffer without marking an event as "used". Should only be called after `.peek()`.
     fn skip(&mut self) {
         debug_assert!(self.cursor < self.buffer.len());
@@ -66,7 +69,7 @@ impl<'root, R: Read> ChildXmlBuffer<'root, R> {
     }
 }
 
-impl<'root, R: Read> BufferedXmlReader for ChildXmlBuffer<'root, R> {
+impl<'parent, R: Read> BufferedXmlReader<R> for ChildXmlBuffer<'parent, R> {
     /// Consumed XML events in a child buffer are marked as "used"
     fn next(&mut self) -> Result<XmlEvent> {
         loop {
@@ -75,23 +78,37 @@ impl<'root, R: Read> BufferedXmlReader for ChildXmlBuffer<'root, R> {
                     let taken = std::mem::replace(entry, CachedXmlEvent::Used);
 
                     return debug_expect!(taken, CachedXmlEvent::Unused(ev) => Ok(ev));
-                }
+                },
                 Some(CachedXmlEvent::Used) => {
                     self.cursor += 1;
                     continue;
-                }
+                },
                 None => {
                     debug_assert_eq!(self.buffer.len(), self.cursor);
 
                     // Skip creation of buffer entry when consuming event straight away
                     return next_significant_event(&mut self.reader);
-                }
+                },
             }
         }
     }
 
     fn peek(&mut self) -> Result<&XmlEvent> {
         get_from_buffer_or_reader(self.buffer, self.reader, self.cursor)
+    }
+
+    fn child_buffer<'a>(&'a mut self) -> ChildXmlBuffer<'a, R> {
+        let ChildXmlBuffer {
+            reader,
+            buffer,
+            cursor,
+        } = self;
+
+        ChildXmlBuffer {
+            reader,
+            buffer,
+            cursor: *cursor,
+        }
     }
 }
 
@@ -115,7 +132,7 @@ fn get_from_buffer_or_reader<'buf>(
             Some(CachedXmlEvent::Used) => {
                 buffer.pop_front();
                 continue;
-            }
+            },
             None => {
                 let next = next_significant_event(reader)?;
                 buffer.push_back(CachedXmlEvent::Unused(next));
@@ -124,7 +141,7 @@ fn get_from_buffer_or_reader<'buf>(
                     Some(CachedXmlEvent::Unused(next)) => next
                 );
                 return Ok(next_ref);
-            }
+            },
         }
     }
 
@@ -139,7 +156,7 @@ fn next_significant_event(reader: &mut EventReader<impl Read>) -> Result<XmlEven
             XmlEvent::StartDocument { .. }
             | XmlEvent::ProcessingInstruction { .. }
             | XmlEvent::Whitespace { .. }
-            | XmlEvent::Comment(_) => { /* skip */ }
+            | XmlEvent::Comment(_) => { /* skip */ },
             other => return Ok(other),
         }
     }
