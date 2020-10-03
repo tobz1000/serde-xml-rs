@@ -1,8 +1,4 @@
-use std::{
-    borrow::{Borrow, BorrowMut},
-    io::Read,
-    marker::PhantomData,
-};
+use std::{io::Read, marker::PhantomData};
 
 use serde::de::{self, Unexpected};
 use xml::name::OwnedName;
@@ -65,28 +61,20 @@ pub fn from_reader<'de, R: Read, T: de::Deserialize<'de>>(reader: R) -> Result<T
     T::deserialize(&mut Deserializer::new_from_reader(reader))
 }
 
-// TODO: Rework as distinct types implementing an `XmlDeserializer` trait?
-// This would reduce the verbosity of types & constraints which need to be specified for a generic
-// deserializer
-type RootDeserializer<R> = Deserializer<R, RootXmlBuffer<R>, DeserializerState>;
-type ChildDeserializer<'parent, R> =
-    Deserializer<R, ChildXmlBuffer<'parent, R>, &'parent mut DeserializerState>;
+type RootDeserializer<R> = Deserializer<R, RootXmlBuffer<R>>;
+type ChildDeserializer<'parent, R> = Deserializer<R, ChildXmlBuffer<'parent, R>>;
 
 pub struct Deserializer<
     R: Read, // Kept as type param to avoid breaking type signature change
     B: BufferedXmlReader<R>,
-    S: BorrowMut<DeserializerState>,
 > {
-    buffered_reader: B,
-    state: S,
-    marker: PhantomData<R>,
-}
-
-pub struct DeserializerState {
     /// XML document nested element depth
     depth: usize,
+    buffered_reader: B,
     /// Transient flag indicating that the cursor is currently at the start of an XML element.
+    // TODO: Update this doc; this might be indicating whether the current element is a struct field or an enum variant...?
     is_map_value: bool,
+    marker: PhantomData<R>,
 }
 
 impl<'de, R: Read> RootDeserializer<R> {
@@ -95,10 +83,8 @@ impl<'de, R: Read> RootDeserializer<R> {
 
         Deserializer {
             buffered_reader,
-            state: DeserializerState {
-                depth: 0,
-                is_map_value: false,
-            },
+            depth: 0,
+            is_map_value: false,
             marker: PhantomData,
         }
     }
@@ -115,19 +101,19 @@ impl<'de, R: Read> RootDeserializer<R> {
     }
 }
 
-impl<'de, R: Read, B: BufferedXmlReader<R>, S: BorrowMut<DeserializerState>> Deserializer<R, B, S> {
-    fn child<'a>(
-        &'a mut self,
-    ) -> Deserializer<R, ChildXmlBuffer<'a, R>, &'a mut DeserializerState> {
+impl<'de, R: Read, B: BufferedXmlReader<R>> Deserializer<R, B> {
+    fn child<'a>(&'a mut self) -> Deserializer<R, ChildXmlBuffer<'a, R>> {
         let Deserializer {
             buffered_reader,
-            state,
+            depth,
+            is_map_value,
             ..
         } = self;
 
         Deserializer {
             buffered_reader: buffered_reader.child_buffer(),
-            state: state.borrow_mut(),
+            depth: *depth,
+            is_map_value: *is_map_value,
             marker: PhantomData,
         }
     }
@@ -144,14 +130,12 @@ impl<'de, R: Read, B: BufferedXmlReader<R>, S: BorrowMut<DeserializerState>> Des
     fn next(&mut self) -> Result<XmlEvent> {
         let next = self.buffered_reader.next()?;
 
-        // TODO: depth incrementing/decrementing doesn't occur when child serializers "skip".
-        // I think child serializers need to use cloned state rather than shared.
         match next {
             XmlEvent::StartElement { .. } => {
-                self.state.borrow_mut().depth += 1;
+                self.depth += 1;
             }
             XmlEvent::EndElement { .. } => {
-                self.state.borrow_mut().depth -= 1;
+                self.depth -= 1;
             }
             _ => {}
         }
@@ -161,11 +145,11 @@ impl<'de, R: Read, B: BufferedXmlReader<R>, S: BorrowMut<DeserializerState>> Des
     }
 
     fn set_map_value(&mut self) {
-        self.state.borrow_mut().is_map_value = true;
+        self.is_map_value = true;
     }
 
     pub fn unset_map_value(&mut self) -> bool {
-        ::std::mem::replace(&mut self.state.borrow_mut().is_map_value, false)
+        ::std::mem::replace(&mut self.is_map_value, false)
     }
 
     /// If `self.is_map_value`: Performs the read operations specified by `f` on the inner content of an XML element.
@@ -229,8 +213,8 @@ macro_rules! deserialize_type {
     };
 }
 
-impl<'de, 'a, R: Read, B: BufferedXmlReader<R>, S: BorrowMut<DeserializerState>>
-    de::Deserializer<'de> for &'a mut Deserializer<R, B, S>
+impl<'de, 'a, R: Read, B: BufferedXmlReader<R>> de::Deserializer<'de>
+    for &'a mut Deserializer<R, B>
 {
     type Error = Error;
 
@@ -337,10 +321,9 @@ impl<'de, 'a, R: Read, B: BufferedXmlReader<R>, S: BorrowMut<DeserializerState>>
     }
 
     fn deserialize_tuple<V: de::Visitor<'de>>(self, len: usize, visitor: V) -> Result<V::Value> {
-        let current_depth = self.state.borrow().depth;
         let child_deserializer = self.child();
 
-        visitor.visit_seq(SeqAccess::new(child_deserializer, current_depth, Some(len)))
+        visitor.visit_seq(SeqAccess::new(child_deserializer, Some(len)))
     }
 
     fn deserialize_enum<V: de::Visitor<'de>>(
@@ -367,10 +350,9 @@ impl<'de, 'a, R: Read, B: BufferedXmlReader<R>, S: BorrowMut<DeserializerState>>
     }
 
     fn deserialize_seq<V: de::Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
-        let current_depth = self.state.borrow().depth;
         let child_deserializer = self.child();
 
-        visitor.visit_seq(SeqAccess::new(child_deserializer, current_depth, None))
+        visitor.visit_seq(SeqAccess::new(child_deserializer, None))
     }
 
     fn deserialize_map<V: de::Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
@@ -391,10 +373,10 @@ impl<'de, 'a, R: Read, B: BufferedXmlReader<R>, S: BorrowMut<DeserializerState>>
 
     fn deserialize_ignored_any<V: de::Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
         self.unset_map_value();
-        let depth = self.state.borrow_mut().depth;
+        let depth = self.depth;
         loop {
             self.next()?;
-            if self.state.borrow_mut().depth == depth {
+            if self.depth == depth {
                 break;
             }
         }

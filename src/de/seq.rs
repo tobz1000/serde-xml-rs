@@ -8,7 +8,6 @@ use error::{Error, Result};
 
 pub struct SeqAccess<'a, R: 'a + Read> {
     de: ChildDeserializer<'a, R>,
-    starting_depth: usize,
     max_size: Option<usize>,
     seq_type: SeqType,
 }
@@ -23,11 +22,7 @@ pub enum SeqType {
 }
 
 impl<'a, R: 'a + Read> SeqAccess<'a, R> {
-    pub fn new(
-        mut de: ChildDeserializer<'a, R>,
-        starting_depth: usize,
-        max_size: Option<usize>,
-    ) -> Self {
+    pub fn new(mut de: ChildDeserializer<'a, R>, max_size: Option<usize>) -> Self {
         let seq_type = if de.unset_map_value() {
             debug_expect!(de.peek(), Ok(&XmlEvent::StartElement { ref name, .. }) => {
                 SeqType::SameElement { expected_name: name.local_name.clone() }
@@ -37,7 +32,6 @@ impl<'a, R: 'a + Read> SeqAccess<'a, R> {
         };
         SeqAccess {
             de,
-            starting_depth,
             max_size,
             seq_type,
         }
@@ -51,11 +45,6 @@ impl<'de, 'a, R: 'a + Read> de::SeqAccess<'de> for SeqAccess<'a, R> {
         &mut self,
         seed: T,
     ) -> Result<Option<T::Value>> {
-        debug_assert_eq!(
-            self.de.state.depth, self.starting_depth,
-            "Element depth should be equal on each re-entry to sequence"
-        );
-
         match self.max_size.as_mut() {
             Some(&mut 0) => {
                 return Ok(None);
@@ -66,20 +55,10 @@ impl<'de, 'a, R: 'a + Read> de::SeqAccess<'de> for SeqAccess<'a, R> {
             None => {}
         }
 
+        let mut local_depth = 0;
+
         match &self.seq_type {
             SeqType::SameElement { expected_name } => loop {
-                debug_assert!(
-                    self.de.state.depth >= self.starting_depth,
-                    "Element depth should only go below starting depth after end of sequence"
-                );
-
-                dbg!((self.de.state.depth, self.starting_depth));
-
-                if self.de.state.depth != self.starting_depth {
-                    self.de.peek()?;
-                    self.de.buffered_reader.skip();
-                }
-
                 let next_element = self.de.peek()?;
 
                 match next_element {
@@ -87,8 +66,19 @@ impl<'de, 'a, R: 'a + Read> de::SeqAccess<'de> for SeqAccess<'a, R> {
                         self.de.set_map_value();
                         return seed.deserialize(&mut self.de).map(Some);
                     }
-                    XmlEvent::EndElement { .. } | XmlEvent::EndDocument => {
-                        println!("Ending seq");
+                    XmlEvent::StartElement { .. } => {
+                        self.de.buffered_reader.skip();
+                        local_depth += 1;
+                    }
+                    XmlEvent::EndElement { .. } => {
+                        if local_depth == 0 {
+                            return Ok(None);
+                        } else {
+                            local_depth -= 1;
+                            self.de.buffered_reader.skip();
+                        }
+                    }
+                    XmlEvent::EndDocument => {
                         return Ok(None);
                     }
                     _ => {
@@ -97,17 +87,6 @@ impl<'de, 'a, R: 'a + Read> de::SeqAccess<'de> for SeqAccess<'a, R> {
                 }
             },
             SeqType::AnyType => loop {
-                todo!();
-                debug_assert!(
-                    self.de.state.depth >= self.starting_depth,
-                    "Element depth should only go below starting depth after end of sequence"
-                );
-
-                if self.de.state.depth != self.starting_depth {
-                    self.de.peek()?;
-                    self.de.buffered_reader.skip();
-                }
-
                 let next_element = self.de.peek()?;
 
                 match next_element {
@@ -118,25 +97,6 @@ impl<'de, 'a, R: 'a + Read> de::SeqAccess<'de> for SeqAccess<'a, R> {
                 }
             },
         }
-
-        // let more = match (&self.seq_type, self.de.peek()?) {
-        //     (SeqType::SameElement { expected_name }, XmlEvent::StartElement { name, .. }) => {
-        //         &name.local_name == expected_name
-        //     }
-        //     (SeqType::SameElement { .. }, _) => false,
-        //     (SeqType::AnyType, XmlEvent::EndElement { .. }) => false,
-        //     (SeqType::AnyType, XmlEvent::EndDocument) => false,
-        //     (SeqType::AnyType, _) => true,
-        // };
-
-        // if more {
-        //     if let SeqType::SameElement { .. } = self.seq_type {
-        //         self.de.set_map_value();
-        //     }
-        //     seed.deserialize(&mut self.de).map(Some)
-        // } else {
-        //     Ok(None)
-        // }
     }
 
     fn size_hint(&self) -> Option<usize> {

@@ -1,4 +1,4 @@
-use std::{borrow::BorrowMut, io::Read};
+use std::io::Read;
 
 use serde::de::{self, IntoDeserializer, Unexpected};
 use xml::attribute::OwnedAttribute;
@@ -7,22 +7,20 @@ use xml::reader::XmlEvent;
 use error::{Error, Result};
 use Deserializer;
 
-use super::{buffer::BufferedXmlReader, DeserializerState};
+use super::buffer::BufferedXmlReader;
 
-pub struct MapAccess<'a, R: 'a + Read, B: BufferedXmlReader<R>, S: BorrowMut<DeserializerState>> {
+pub struct MapAccess<'a, R: 'a + Read, B: BufferedXmlReader<R>> {
     attrs: ::std::vec::IntoIter<OwnedAttribute>,
     /// Cache of attribute value, populated when visitor calls `next_key_seed`; should be read & emptied straight after
     /// by visitor call to `next_value_seed`
     next_attr_value: Option<String>,
-    de: &'a mut Deserializer<R, B, S>,
+    de: &'a mut Deserializer<R, B>,
     inner_text_value: bool,
 }
 
-impl<'a, R: 'a + Read, B: BufferedXmlReader<R>, S: BorrowMut<DeserializerState>>
-    MapAccess<'a, R, B, S>
-{
+impl<'a, R: 'a + Read, B: BufferedXmlReader<R>> MapAccess<'a, R, B> {
     pub fn new(
-        de: &'a mut Deserializer<R, B, S>,
+        de: &'a mut Deserializer<R, B>,
         attrs: Vec<OwnedAttribute>,
         inner_text_value: bool,
     ) -> Self {
@@ -35,9 +33,7 @@ impl<'a, R: 'a + Read, B: BufferedXmlReader<R>, S: BorrowMut<DeserializerState>>
     }
 }
 
-impl<'de, 'a, R: 'a + Read, B: BufferedXmlReader<R>, S: BorrowMut<DeserializerState>>
-    de::MapAccess<'de> for MapAccess<'a, R, B, S>
-{
+impl<'de, 'a, R: 'a + Read, B: BufferedXmlReader<R>> de::MapAccess<'de> for MapAccess<'a, R, B> {
     type Error = Error;
 
     fn next_key_seed<K: de::DeserializeSeed<'de>>(&mut self, seed: K) -> Result<Option<K::Value>> {
@@ -48,7 +44,7 @@ impl<'de, 'a, R: 'a + Read, B: BufferedXmlReader<R>, S: BorrowMut<DeserializerSt
                 self.next_attr_value = Some(value);
                 seed.deserialize(name.local_name.into_deserializer())
                     .map(Some)
-            },
+            }
             None => match *self.de.peek()? {
                 XmlEvent::StartElement { ref name, .. } => seed
                     .deserialize(
@@ -79,7 +75,7 @@ impl<'de, 'a, R: 'a + Read, B: BufferedXmlReader<R>, S: BorrowMut<DeserializerSt
                 }
                 let result = seed.deserialize(&mut *self.de)?;
                 Ok(result)
-            },
+            }
         }
     }
 

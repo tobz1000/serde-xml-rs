@@ -1,4 +1,4 @@
-use std::{borrow::BorrowMut, io::Read};
+use std::io::Read;
 
 use serde::de::{self, Deserializer as SerdeDeserializer, IntoDeserializer};
 use xml::name::OwnedName;
@@ -7,30 +7,26 @@ use xml::reader::XmlEvent;
 use de::Deserializer;
 use error::{Error, Result};
 
-use super::{buffer::BufferedXmlReader, DeserializerState};
+use super::buffer::BufferedXmlReader;
 
-pub struct EnumAccess<'a, R: 'a + Read, B: BufferedXmlReader<R>, S: BorrowMut<DeserializerState>> {
-    de: &'a mut Deserializer<R, B, S>,
+pub struct EnumAccess<'a, R: 'a + Read, B: BufferedXmlReader<R>> {
+    de: &'a mut Deserializer<R, B>,
 }
 
-impl<'a, R: 'a + Read, B: BufferedXmlReader<R>, S: BorrowMut<DeserializerState>>
-    EnumAccess<'a, R, B, S>
-{
-    pub fn new(de: &'a mut Deserializer<R, B, S>) -> Self {
+impl<'a, R: 'a + Read, B: BufferedXmlReader<R>> EnumAccess<'a, R, B> {
+    pub fn new(de: &'a mut Deserializer<R, B>) -> Self {
         EnumAccess { de: de }
     }
 }
 
-impl<'de, 'a, R: 'a + Read, B: BufferedXmlReader<R>, S: BorrowMut<DeserializerState>>
-    de::EnumAccess<'de> for EnumAccess<'a, R, B, S>
-{
+impl<'de, 'a, R: 'a + Read, B: BufferedXmlReader<R>> de::EnumAccess<'de> for EnumAccess<'a, R, B> {
     type Error = Error;
-    type Variant = VariantAccess<'a, R, B, S>;
+    type Variant = VariantAccess<'a, R, B>;
 
     fn variant_seed<V: de::DeserializeSeed<'de>>(
         self,
         seed: V,
-    ) -> Result<(V::Value, VariantAccess<'a, R, B, S>)> {
+    ) -> Result<(V::Value, VariantAccess<'a, R, B>)> {
         let name = expect!(
             self.de.peek()?,
 
@@ -44,21 +40,18 @@ impl<'de, 'a, R: 'a + Read, B: BufferedXmlReader<R>, S: BorrowMut<DeserializerSt
     }
 }
 
-pub struct VariantAccess<'a, R: 'a + Read, B: BufferedXmlReader<R>, S: BorrowMut<DeserializerState>>
-{
-    de: &'a mut Deserializer<R, B, S>,
+pub struct VariantAccess<'a, R: 'a + Read, B: BufferedXmlReader<R>> {
+    de: &'a mut Deserializer<R, B>,
 }
 
-impl<'a, R: 'a + Read, B: BufferedXmlReader<R>, S: BorrowMut<DeserializerState>>
-    VariantAccess<'a, R, B, S>
-{
-    pub fn new(de: &'a mut Deserializer<R, B, S>) -> Self {
+impl<'a, R: 'a + Read, B: BufferedXmlReader<R>> VariantAccess<'a, R, B> {
+    pub fn new(de: &'a mut Deserializer<R, B>) -> Self {
         VariantAccess { de: de }
     }
 }
 
-impl<'de, 'a, R: 'a + Read, B: BufferedXmlReader<R>, S: BorrowMut<DeserializerState>>
-    de::VariantAccess<'de> for VariantAccess<'a, R, B, S>
+impl<'de, 'a, R: 'a + Read, B: BufferedXmlReader<R>> de::VariantAccess<'de>
+    for VariantAccess<'a, R, B>
 {
     type Error = Error;
 
@@ -73,7 +66,7 @@ impl<'de, 'a, R: 'a + Read, B: BufferedXmlReader<R>, S: BorrowMut<DeserializerSt
                 } else {
                     Err(de::Error::invalid_length(attributes.len(), &"0"))
                 }
-            },
+            }
             XmlEvent::Characters(_) => Ok(()),
             _ => unreachable!(),
         }
