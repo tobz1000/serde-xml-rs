@@ -65,14 +65,12 @@ type RootDeserializer<R> = Deserializer<R, RootXmlBuffer<R>>;
 type ChildDeserializer<'parent, R> = Deserializer<R, ChildXmlBuffer<'parent, R>>;
 
 pub struct Deserializer<
-    R: Read, // Kept as type param to avoid breaking type signature change
+    R: Read, // Kept as type param to avoid type signature breaking-change
     B: BufferedXmlReader<R>,
 > {
     /// XML document nested element depth
     depth: usize,
     buffered_reader: B,
-    /// Transient flag indicating that the cursor is currently at the start of an XML element.
-    // TODO: Update this doc; this might be indicating whether the current element is a struct field or an enum variant...?
     is_map_value: bool,
     marker: PhantomData<R>,
 }

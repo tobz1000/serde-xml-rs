@@ -29,7 +29,7 @@ impl<R: Read> RootXmlBuffer<R> {
 }
 
 impl<R: Read> BufferedXmlReader<R> for RootXmlBuffer<R> {
-    /// Used XML events in the root buffer are moved to the caller
+    /// Consumed XML events in the root buffer are moved to the caller
     fn next(&mut self) -> Result<XmlEvent> {
         loop {
             match self.buffer.pop_front() {
