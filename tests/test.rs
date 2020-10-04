@@ -166,22 +166,22 @@ fn out_of_order_collection() {
     struct Collection {
         a: Vec<A>,
         b: Vec<B>,
-        c: C
+        c: C,
     }
 
     #[derive(Debug, Deserialize, PartialEq)]
     struct A {
-        name: String
+        name: String,
     }
 
     #[derive(Debug, Deserialize, PartialEq)]
     struct B {
-        name: String
+        name: String,
     }
 
     #[derive(Debug, Deserialize, PartialEq)]
     struct C {
-        name: String
+        name: String,
     }
 
     let _ = simple_logger::init();
@@ -205,11 +205,8 @@ fn out_of_order_collection() {
             A { name: "a3".into() },
             A { name: "a4".into() },
         ],
-        b: vec![
-            B { name: "b1".into() },
-            B { name: "b2".into() },
-        ],
-        c: C { name: "c".into() }
+        b: vec![B { name: "b1".into() }, B { name: "b2".into() }],
+        c: C { name: "c".into() },
     };
 
     let actual: Collection = from_str(&in_xml).unwrap();

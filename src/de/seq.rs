@@ -14,21 +14,19 @@ pub struct SeqAccess<'a, R: 'a + Read> {
 
 pub enum SeqType {
     /// Sequence is of elements with the same name.
-    SameElement { expected_name: String },
-    /// Sequence if of elements with multiple names (enums).
-    /// TODO: Need to find somewhere to obtain the names we're looking for, to support out-of-order
-    /// elements
-    AnyType,
+    ByElementName { expected_name: String },
+    /// Sequence is of all elements/text at current depth.
+    AllMembers,
 }
 
 impl<'a, R: 'a + Read> SeqAccess<'a, R> {
     pub fn new(mut de: ChildDeserializer<'a, R>, max_size: Option<usize>) -> Self {
         let seq_type = if de.unset_map_value() {
             debug_expect!(de.peek(), Ok(&XmlEvent::StartElement { ref name, .. }) => {
-                SeqType::SameElement { expected_name: name.local_name.clone() }
+                SeqType::ByElementName { expected_name: name.local_name.clone() }
             })
         } else {
-            SeqType::AnyType
+            SeqType::AllMembers
         };
         SeqAccess {
             de,
@@ -58,7 +56,7 @@ impl<'de, 'a, R: 'a + Read> de::SeqAccess<'de> for SeqAccess<'a, R> {
         let mut local_depth = 0;
 
         match &self.seq_type {
-            SeqType::SameElement { expected_name } => loop {
+            SeqType::ByElementName { expected_name } => loop {
                 let next_element = self.de.peek()?;
 
                 match next_element {
@@ -86,7 +84,7 @@ impl<'de, 'a, R: 'a + Read> de::SeqAccess<'de> for SeqAccess<'a, R> {
                     }
                 }
             },
-            SeqType::AnyType => loop {
+            SeqType::AllMembers => {
                 let next_element = self.de.peek()?;
 
                 match next_element {
@@ -95,7 +93,7 @@ impl<'de, 'a, R: 'a + Read> de::SeqAccess<'de> for SeqAccess<'a, R> {
                         return seed.deserialize(&mut self.de).map(Some);
                     }
                 }
-            },
+            }
         }
     }
 

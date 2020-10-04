@@ -41,7 +41,7 @@ impl<R: Read> BufferedXmlReader<R> for RootXmlBuffer<R> {
     }
 
     fn peek(&mut self) -> Result<&XmlEvent> {
-        get_from_buffer_or_reader(&mut self.buffer, &mut self.reader, 0)
+        get_from_buffer_or_reader(&mut self.buffer, &mut self.reader, &mut 0)
     }
 
     fn child_buffer<'root>(&'root mut self) -> ChildXmlBuffer<'root, R> {
@@ -97,7 +97,7 @@ impl<'parent, R: Read> BufferedXmlReader<R> for ChildXmlBuffer<'parent, R> {
     }
 
     fn peek(&mut self) -> Result<&XmlEvent> {
-        get_from_buffer_or_reader(self.buffer, self.reader, self.cursor)
+        get_from_buffer_or_reader(self.buffer, self.reader, &mut self.cursor)
     }
 
     fn child_buffer<'a>(&'a mut self) -> ChildXmlBuffer<'a, R> {
@@ -124,16 +124,17 @@ enum CachedXmlEvent {
 fn get_from_buffer_or_reader<'buf>(
     buffer: &'buf mut VecDeque<CachedXmlEvent>,
     reader: &mut EventReader<impl Read>,
-    index: usize,
+    index: &mut usize,
 ) -> Result<&'buf XmlEvent> {
     // We should only be attempting to get an event already in the buffer, or the next event to place in the buffer
-    debug_assert!(index <= buffer.len());
+    debug_assert!(*index <= buffer.len());
 
     loop {
-        match buffer.get_mut(index) {
+        dbg!();
+        match buffer.get_mut(*index) {
             Some(CachedXmlEvent::Unused(_)) => break,
             Some(CachedXmlEvent::Used) => {
-                buffer.pop_front();
+                *index += 1;
             }
             None => {
                 let next = next_significant_event(reader)?;
@@ -143,7 +144,7 @@ fn get_from_buffer_or_reader<'buf>(
     }
 
     // Returning of borrowed data must be done after of loop/match due to current limitation of borrow checker
-    debug_expect!(buffer.get_mut(index), Some(CachedXmlEvent::Unused(event)) => Ok(event))
+    debug_expect!(buffer.get_mut(*index), Some(CachedXmlEvent::Unused(event)) => Ok(event))
 }
 
 /// Reads the next XML event from the underlying reader, skipping events we're not interested in.
