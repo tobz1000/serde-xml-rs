@@ -207,7 +207,7 @@ macro_rules! deserialize_type {
             let value = self.prepare_parse_type::<V>()?.parse()?;
             visitor.$visit(value)
         }
-    }
+    };
 }
 
 impl<'de, 'a, R: Read, B: BufferedXmlReader<R>> de::Deserializer<'de>
@@ -230,7 +230,7 @@ impl<'de, 'a, R: Read, B: BufferedXmlReader<R>> de::Deserializer<'de>
             let map_value = visitor.visit_map(MapAccess::new(
                 self,
                 attributes,
-                fields.contains(&"$value")
+                dbg!(fields).contains(&"$value")
             ))?;
             self.expect_end_element(name)?;
             Ok(map_value)
@@ -353,6 +353,7 @@ impl<'de, 'a, R: Read, B: BufferedXmlReader<R>> de::Deserializer<'de>
     }
 
     fn deserialize_map<V: de::Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
+        dbg!();
         self.unset_map_value();
         expect!(self.next()?, XmlEvent::StartElement { name, attributes, .. } => {
             let map_value = visitor.visit_map(MapAccess::new(self, attributes, false))?;

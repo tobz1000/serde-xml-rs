@@ -161,6 +161,49 @@ fn collection_of_enums() {
 }
 
 #[test]
+fn inner_value_collection_with_flattened_attributes() {
+    #[derive(Debug, Deserialize, PartialEq)]
+    struct Collection {
+        #[serde(rename = "$value")]
+        vals: Vec<A>,
+        #[serde(flatten)]
+        attrs: CollectionAttributes,
+    }
+
+    #[derive(Debug, Deserialize, PartialEq)]
+    enum A {
+        A { aname: String },
+    }
+
+    #[derive(Debug, Deserialize, PartialEq)]
+    struct CollectionAttributes {
+        attr1: String,
+        attr2: String,
+    }
+
+    // let _ = simple_logger::init();
+
+    let in_xml = r#"
+        <collection attr1="val1" attr2="val2">
+            <A aname="a1" />
+            <A aname="a2" />
+        </collection>
+    "#;
+
+    let should_be = Collection {
+        vals: vec![A::A { aname: "a1".into() }, A::A { aname: "a3".into() }],
+        attrs: CollectionAttributes {
+            attr1: "val1".into(),
+            attr2: "val2".into(),
+        },
+    };
+
+    let actual: Collection = from_str(&in_xml).unwrap();
+
+    assert_eq!(should_be, actual);
+}
+
+#[test]
 fn out_of_order_collection() {
     #[derive(Debug, Deserialize, PartialEq)]
     struct Collection {

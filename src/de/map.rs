@@ -20,12 +20,16 @@ pub struct MapAccess<'a, R: 'a + Read, B: BufferedXmlReader<R>> {
 }
 
 impl<'a, R: 'a + Read, B: BufferedXmlReader<R>> MapAccess<'a, R, B> {
-    pub fn new(de: &'a mut Deserializer<R, B>, attrs: Vec<OwnedAttribute>, inner_value: bool) -> Self {
+    pub fn new(
+        de: &'a mut Deserializer<R, B>,
+        attrs: Vec<OwnedAttribute>,
+        inner_value: bool,
+    ) -> Self {
         MapAccess {
-            attrs: attrs.into_iter(),
+            attrs: dbg!(attrs).into_iter(),
             next_attr_value: None,
             de: de,
-            inner_value: inner_value,
+            inner_value: dbg!(inner_value),
         }
     }
 }
@@ -35,22 +39,29 @@ impl<'de, 'a, R: 'a + Read, B: BufferedXmlReader<R>> de::MapAccess<'de> for MapA
 
     fn next_key_seed<K: de::DeserializeSeed<'de>>(&mut self, seed: K) -> Result<Option<K::Value>> {
         debug_assert_eq!(self.next_attr_value, None);
+        print!("key ");
         match self.attrs.next() {
             // Read all attributes first
             Some(OwnedAttribute { name, value }) => {
                 self.next_attr_value = Some(value);
+                dbg!(&name.local_name);
                 seed.deserialize(name.local_name.into_deserializer())
                     .map(Some)
-            },
+            }
             None => match *self.de.peek()? {
-                XmlEvent::StartElement { ref name, .. } => seed.deserialize(
-                    if !self.inner_value {
-                        name.local_name.as_str()
-                    } else {
-                        "$value"
-                    }.into_deserializer(),
-                ).map(Some),
-                XmlEvent::Characters(_) => seed.deserialize("$value".into_deserializer()).map(Some),
+                XmlEvent::StartElement { ref name, .. } => seed
+                    .deserialize(
+                        if !self.inner_value {
+                            dbg!(name.local_name.as_str())
+                        } else {
+                            dbg!("$value")
+                        }
+                        .into_deserializer(),
+                    )
+                    .map(Some),
+                XmlEvent::Characters(_) => seed
+                    .deserialize(dbg!("$value").into_deserializer())
+                    .map(Some),
                 // Any other event: assume end of map values (actual check for `EndElement` done by the originating
                 // `Deserializer`)
                 _ => Ok(None),
@@ -60,16 +71,17 @@ impl<'de, 'a, R: 'a + Read, B: BufferedXmlReader<R>> de::MapAccess<'de> for MapA
 
     fn next_value_seed<V: de::DeserializeSeed<'de>>(&mut self, seed: V) -> Result<V::Value> {
         match self.next_attr_value.take() {
-            Some(value) => seed.deserialize(AttrValueDeserializer(value)),
+            Some(value) => seed.deserialize(AttrValueDeserializer(dbg!(value))),
             None => {
                 if !self.inner_value {
                     if let XmlEvent::StartElement { .. } = *self.de.peek()? {
                         self.de.set_map_value();
                     }
                 }
+                eprintln!("val [{}]", if self.inner_value { "inner" } else { "next" });
                 let result = seed.deserialize(&mut *self.de)?;
                 Ok(result)
-            },
+            }
         }
     }
 
@@ -85,7 +97,7 @@ macro_rules! deserialize_type_attr {
         fn $deserialize<V: de::Visitor<'de>>(self, visitor: V) -> Result<V::Value> {
             visitor.$visit(self.0.parse()?)
         }
-    }
+    };
 }
 
 impl<'de> de::Deserializer<'de> for AttrValueDeserializer {
@@ -123,7 +135,10 @@ impl<'de> de::Deserializer<'de> for AttrValueDeserializer {
         match self.0.as_str() {
             "true" | "1" => visitor.visit_bool(true),
             "false" | "0" => visitor.visit_bool(false),
-            _ => Err(de::Error::invalid_value(Unexpected::Str(&self.0), &"a boolean")),
+            _ => Err(de::Error::invalid_value(
+                Unexpected::Str(&self.0),
+                &"a boolean",
+            )),
         }
     }
 
