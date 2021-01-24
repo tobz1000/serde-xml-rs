@@ -4,7 +4,7 @@ description = "Pseudo-namespaced fork of `serde-xml-rs`"
 license = "MIT"
 name = "tobz1000-serde-xml-rs"
 repository = "https://github.com/tobz1000/serde-xml-rs"
-version = "0.4.1-tobz1000"
+version = "0.4.1-tobz1000-1"
 
 [dependencies]
 log = "0.4"
@@ -16,3 +16,6 @@ thiserror = "1.0"
 serde_derive = "1.0"
 simple_logger = "1.0.1"
 docmatic = "0.1.2"
+
+[lib]
+name = "serde_xml_rs"
